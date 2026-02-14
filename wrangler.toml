@@ -1,0 +1,3 @@
+name = "firecrawl-ctf-worker"
+main = "worker/index.ts"
+compatibility_date = "2026-02-13"
