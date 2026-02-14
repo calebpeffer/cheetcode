@@ -1,14 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { GameProblem, SubmitResultsResponse } from "@/lib/types";
+import { useQuery, useMutation, useAction } from "convex/react";
+import { api } from "../../convex/_generated/api";
+import type { GameProblem } from "@/lib/types";
+import type { Id } from "../../convex/_generated/dataModel";
 
 type Screen = "landing" | "playing" | "results";
 
-type LeaderboardEntry = {
-  github: string;
-  solved: number;
+type ResultsData = {
   elo: number;
+  solved: number;
+  rank: number;
+  timeRemaining: number;
 };
 
 const ROUND_MS = 45_000;
@@ -23,13 +27,12 @@ export default function Home() {
   const [screen, setScreen] = useState<Screen>("landing");
   const [github, setGithub] = useState("");
   const [showLeaderboard, setShowLeaderboard] = useState(false);
-  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
-  const [sessionId, setSessionId] = useState("");
+  const [sessionId, setSessionId] = useState<Id<"sessions"> | null>(null);
   const [expiresAt, setExpiresAt] = useState(0);
   const [problems, setProblems] = useState<GameProblem[]>([]);
   const [codes, setCodes] = useState<Record<string, string>>({});
   const [localPass, setLocalPass] = useState<Record<string, boolean | null>>({});
-  const [results, setResults] = useState<SubmitResultsResponse | null>(null);
+  const [results, setResults] = useState<ResultsData | null>(null);
   const [email, setEmail] = useState("");
   const [xHandle, setXHandle] = useState("");
   const [flag, setFlag] = useState("");
@@ -38,9 +41,14 @@ export default function Home() {
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [now, setNow] = useState(Date.now());
   const workerRef = useRef<Worker | null>(null);
-  // Suppress auto-finish after auto-solve so the game doesn't immediately close
   const skipAutoFinishRef = useRef(false);
   const canAutoSolve = process.env.NODE_ENV !== "production";
+
+  // ── Convex hooks ──
+  const leaderboard = useQuery(api.leaderboard.getAll) ?? [];
+  const createSession = useMutation(api.sessions.create);
+  const submitResultsAction = useAction(api.submissions.submitResults);
+  const submitLeadMutation = useMutation(api.leads.submit);
 
   useEffect(() => {
     workerRef.current = new Worker(
@@ -59,17 +67,6 @@ export default function Home() {
     return () => clearInterval(id);
   }, []);
 
-  useEffect(() => {
-    const load = async () => {
-      const r = await fetch("/api/leaderboard");
-      const d = (await r.json()) as { entries: LeaderboardEntry[] };
-      setLeaderboard(d.entries);
-    };
-    load();
-    const id = setInterval(load, 3000);
-    return () => clearInterval(id);
-  }, []);
-
   const timeLeftMs = useMemo(() => Math.max(0, expiresAt - now), [expiresAt, now]);
   const secondsLeft = Math.ceil(timeLeftMs / 1000);
   const progress = expiresAt ? Math.max(0, Math.min(100, (timeLeftMs / ROUND_MS) * 100)) : 0;
@@ -78,17 +75,11 @@ export default function Home() {
     [problems, localPass],
   );
   const timeUp = screen === "playing" && timeLeftMs === 0;
-  const timerColor =
-    secondsLeft <= 10 ? "text-accent-crimson" : secondsLeft <= 20 ? "text-heat-100" : "text-accent-forest";
-  const barColor =
-    secondsLeft <= 10 ? "bg-accent-crimson" : secondsLeft <= 20 ? "bg-heat-100" : "bg-accent-forest";
 
   const finishGame = useCallback(async () => {
     if (!sessionId || results) return;
-    const r = await fetch("/api/submit", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    try {
+      const d = await submitResultsAction({
         sessionId,
         github,
         timeElapsed: ROUND_MS - timeLeftMs,
@@ -96,43 +87,37 @@ export default function Home() {
           problemId: p.id,
           code: codes[p.id] ?? "",
         })),
-      }),
-    });
-    if (!r.ok) return;
-    const d = (await r.json()) as SubmitResultsResponse;
-    setResults(d);
-    setScreen("results");
-  }, [sessionId, results, github, timeLeftMs, problems, codes]);
+      });
+      setResults(d);
+      setScreen("results");
+    } catch (err) {
+      console.error("submitResults failed:", err);
+    }
+  }, [sessionId, results, github, timeLeftMs, problems, codes, submitResultsAction]);
 
   useEffect(() => {
     if (screen !== "playing") return;
-    // Timer expiry always finishes; solving all 10 finishes only if not auto-solving
     if (timeLeftMs === 0) void finishGame();
     else if (solvedLocal === 10 && !skipAutoFinishRef.current) void finishGame();
   }, [timeLeftMs, solvedLocal, screen, finishGame]);
 
   async function startGame() {
-    const r = await fetch("/api/sessions", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ github }),
-    });
-    if (!r.ok) return;
-    const d = (await r.json()) as {
-      sessionId: string;
-      expiresAt: number;
-      problems: GameProblem[];
-    };
-    setSessionId(d.sessionId);
-    setExpiresAt(d.expiresAt);
-    setProblems(d.problems);
-    setCodes(Object.fromEntries(d.problems.map((p) => [p.id, p.starterCode])));
-    setLocalPass({});
-    setSubmittedLead(false);
-    setResults(null);
-    setSelectedIdx(0);
-    skipAutoFinishRef.current = false;
-    setScreen("playing");
+    try {
+      const d = await createSession({ github });
+      setSessionId(d.sessionId);
+      setExpiresAt(d.expiresAt);
+      // Convex returns problems with the right shape
+      setProblems(d.problems as unknown as GameProblem[]);
+      setCodes(Object.fromEntries(d.problems.map((p: { id: string; starterCode: string }) => [p.id, p.starterCode])));
+      setLocalPass({});
+      setSubmittedLead(false);
+      setResults(null);
+      setSelectedIdx(0);
+      skipAutoFinishRef.current = false;
+      setScreen("playing");
+    } catch (err) {
+      console.error("createSession failed:", err);
+    }
   }
 
   function runLocalCheck(problem: GameProblem) {
@@ -147,17 +132,18 @@ export default function Home() {
   }
 
   async function submitLeadForm() {
-    const r = await fetch("/api/leads", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ github, email, xHandle, flag, sessionId }),
-    });
-    if (r.ok) setSubmittedLead(true);
+    if (!sessionId) return;
+    try {
+      await submitLeadMutation({ github, email, xHandle, flag, sessionId });
+      setSubmittedLead(true);
+    } catch (err) {
+      console.error("submitLead failed:", err);
+    }
   }
 
   function resetAll() {
     setScreen("landing");
-    setSessionId("");
+    setSessionId(null);
     setExpiresAt(0);
     setProblems([]);
     setCodes({});
@@ -186,10 +172,11 @@ export default function Home() {
     setIsAutoSolving(true);
     skipAutoFinishRef.current = true;
     try {
+      // Auto-solve uses a local API route (dev-only) — pass problem IDs directly
       const r = await fetch("/api/dev/auto-solve", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionId }),
+        body: JSON.stringify({ problemIds: problems.map((p) => p.id) }),
       });
       if (!r.ok) return;
       const d = (await r.json()) as { solutions: Record<string, string> };

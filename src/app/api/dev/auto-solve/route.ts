@@ -1,19 +1,25 @@
 import { NextResponse } from "next/server";
-import { getSessionSolutions } from "../../../../server/store";
+import { PROBLEM_BANK } from "../../../../../server/problems";
 
 export async function POST(request: Request) {
-  // Keep this endpoint dev-only so production gameplay is unaffected.
+  // Dev-only — returns solutions for given problem IDs
   if (process.env.NODE_ENV === "production") {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
   try {
-    const body = (await request.json()) as { sessionId?: string };
-    if (!body.sessionId) {
-      return NextResponse.json({ error: "sessionId required" }, { status: 400 });
+    const body = (await request.json()) as { problemIds?: string[] };
+    if (!body.problemIds || !body.problemIds.length) {
+      return NextResponse.json({ error: "problemIds required" }, { status: 400 });
     }
 
-    const solutions = getSessionSolutions(body.sessionId);
+    const byId = new Map(PROBLEM_BANK.map((p) => [p.id, p]));
+    const solutions: Record<string, string> = {};
+    for (const id of body.problemIds) {
+      const problem = byId.get(id);
+      if (problem) solutions[id] = problem.solution;
+    }
+
     return NextResponse.json({ solutions });
   } catch (error) {
     return NextResponse.json(

@@ -378,8 +378,8 @@ function shuffle<T>(items: T[]): T[] {
 }
 
 export function stripSolution(problem: Problem): PublicProblem {
-  const publicProblem = { ...problem };
-  delete (publicProblem as Problem).solution;
+  // Destructure to omit solution, return the rest as a PublicProblem
+  const { solution: _, ...publicProblem } = problem;
   return publicProblem;
 }
 
