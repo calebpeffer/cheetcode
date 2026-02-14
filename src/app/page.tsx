@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useMutation, useAction } from "convex/react";
+import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { GameProblem } from "@/lib/types";
 import type { Id } from "../../convex/_generated/dataModel";
+import { validateGithub, validateEmail, validateXHandle } from "@/lib/validation";
 
 type Screen = "landing" | "playing" | "results";
 
@@ -16,11 +17,23 @@ type ResultsData = {
 };
 
 const ROUND_MS = 45_000;
+const MOBILE_BREAKPOINT = 900;
 
-function diffBadge(d: string) {
-  if (d === "easy") return "badge-easy";
-  if (d === "medium") return "badge-medium";
-  return "badge-hard";
+/** Original announcement tweet — every share quote-tweets this to amplify it.
+ *  Replace with the real tweet URL once published. */
+const ORIGINAL_TWEET_URL = "https://x.com/fiabordarlan/status/1890614024413831618";
+
+/** True when viewport < 900px — gate gameplay on small screens */
+function useIsMobile() {
+  const [mobile, setMobile] = useState(false);
+  useEffect(() => {
+    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`);
+    setMobile(mql.matches);
+    const handler = (e: MediaQueryListEvent) => setMobile(e.matches);
+    mql.addEventListener("change", handler);
+    return () => mql.removeEventListener("change", handler);
+  }, []);
+  return mobile;
 }
 
 export default function Home() {
@@ -38,16 +51,19 @@ export default function Home() {
   const [flag, setFlag] = useState("");
   const [submittedLead, setSubmittedLead] = useState(false);
   const [isAutoSolving, setIsAutoSolving] = useState(false);
-  const [selectedIdx, setSelectedIdx] = useState(0);
   const [now, setNow] = useState(Date.now());
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  // Inline validation error messages
+  const [githubError, setGithubError] = useState("");
+  const [emailError, setEmailError] = useState("");
+  const [xHandleError, setXHandleError] = useState("");
   const workerRef = useRef<Worker | null>(null);
-  const skipAutoFinishRef = useRef(false);
   const canAutoSolve = process.env.NODE_ENV !== "production";
+  const isMobile = useIsMobile();
 
   // ── Convex hooks ──
   const leaderboard = useQuery(api.leaderboard.getAll) ?? [];
   const createSession = useMutation(api.sessions.create);
-  const submitResultsAction = useAction(api.submissions.submitResults);
   const submitLeadMutation = useMutation(api.leads.submit);
 
   useEffect(() => {
@@ -77,43 +93,56 @@ export default function Home() {
   const timeUp = screen === "playing" && timeLeftMs === 0;
 
   const finishGame = useCallback(async () => {
-    if (!sessionId || results) return;
+    if (!sessionId || results || isSubmitting) return;
+    setIsSubmitting(true);
     try {
-      const d = await submitResultsAction({
-        sessionId,
-        github,
-        timeElapsed: ROUND_MS - timeLeftMs,
-        submissions: problems.map((p) => ({
-          problemId: p.id,
-          code: codes[p.id] ?? "",
-        })),
+      // Call our Next.js API route which validates with QuickJS (in-process)
+      // then updates Convex leaderboard — no cross-origin issues
+      const res = await fetch("/api/finish", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          github,
+          timeElapsed: ROUND_MS - timeLeftMs,
+          submissions: problems.map((p) => ({
+            problemId: p.id,
+            code: codes[p.id] ?? "",
+          })),
+        }),
       });
+      if (!res.ok) throw new Error(`finish failed: ${res.status}`);
+      const d = await res.json();
       setResults(d);
       setScreen("results");
     } catch (err) {
       console.error("submitResults failed:", err);
+    } finally {
+      setIsSubmitting(false);
     }
-  }, [sessionId, results, github, timeLeftMs, problems, codes, submitResultsAction]);
+  }, [sessionId, results, isSubmitting, github, timeLeftMs, problems, codes]);
 
+  // Auto-submit when timer expires — manual SUBMIT button handles early finish
   useEffect(() => {
-    if (screen !== "playing") return;
-    if (timeLeftMs === 0) void finishGame();
-    else if (solvedLocal === 10 && !skipAutoFinishRef.current) void finishGame();
-  }, [timeLeftMs, solvedLocal, screen, finishGame]);
+    if (screen === "playing" && timeLeftMs === 0) void finishGame();
+  }, [timeLeftMs, screen, finishGame]);
 
   async function startGame() {
+    // Client-side validation before hitting the server
+    const ghResult = validateGithub(github);
+    if (ghResult.ok === false) { setGithubError(ghResult.error); return; }
+    setGithubError("");
+
     try {
-      const d = await createSession({ github });
+      const d = await createSession({ github: ghResult.value });
       setSessionId(d.sessionId);
       setExpiresAt(d.expiresAt);
-      // Convex returns problems with the right shape
       setProblems(d.problems as unknown as GameProblem[]);
       setCodes(Object.fromEntries(d.problems.map((p: { id: string; starterCode: string }) => [p.id, p.starterCode])));
       setLocalPass({});
       setSubmittedLead(false);
       setResults(null);
-      setSelectedIdx(0);
-      skipAutoFinishRef.current = false;
+      setIsSubmitting(false);
       setScreen("playing");
     } catch (err) {
       console.error("createSession failed:", err);
@@ -133,8 +162,22 @@ export default function Home() {
 
   async function submitLeadForm() {
     if (!sessionId) return;
+    // Client-side validation
+    const emailResult = validateEmail(email);
+    const xResult = validateXHandle(xHandle);
+    if (emailResult.ok === false) { setEmailError(emailResult.error); return; }
+    if (xResult.ok === false) { setXHandleError(xResult.error); return; }
+    setEmailError("");
+    setXHandleError("");
+
     try {
-      await submitLeadMutation({ github, email, xHandle, flag, sessionId });
+      await submitLeadMutation({
+        github,
+        email: emailResult.value,
+        xHandle: xResult.value || undefined,
+        flag,
+        sessionId,
+      });
       setSubmittedLead(true);
     } catch (err) {
       console.error("submitLead failed:", err);
@@ -153,24 +196,24 @@ export default function Home() {
     setXHandle("");
     setFlag("");
     setSubmittedLead(false);
-    setSelectedIdx(0);
+    setGithubError("");
+    setEmailError("");
+    setXHandleError("");
   }
 
   async function shareScore() {
     if (!results) return;
-    const text = `I just scored ${results.elo} on the Firecrawl CTF — 10 problems, 45 seconds. 🔥 Think you can beat it? ${window.location.origin}`;
-    await navigator.clipboard.writeText(text);
-    window.open(
-      `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`,
-      "_blank",
-      "noopener,noreferrer",
-    );
+    // Quote-tweet the original announcement so every share amplifies it
+    const text = `I just scored ${results.elo} on the Firecrawl CTF — 10 problems, 45 seconds. 🔥 Think you can beat it?`;
+    const tweetUrl =
+      `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(ORIGINAL_TWEET_URL)}`;
+    await navigator.clipboard.writeText(`${text} ${ORIGINAL_TWEET_URL}`);
+    window.open(tweetUrl, "_blank", "noopener,noreferrer");
   }
 
   async function autoSolve() {
     if (!sessionId || !canAutoSolve) return;
     setIsAutoSolving(true);
-    skipAutoFinishRef.current = true;
     try {
       // Auto-solve uses a local API route (dev-only) — pass problem IDs directly
       const r = await fetch("/api/dev/auto-solve", {
@@ -181,17 +224,100 @@ export default function Home() {
       if (!r.ok) return;
       const d = (await r.json()) as { solutions: Record<string, string> };
       setCodes((cur) => ({ ...cur, ...d.solutions }));
-      problems.forEach((p) => {
-        if (!d.solutions[p.id]) return;
+      // Stagger worker messages so each gets processed cleanly
+      for (const p of problems) {
+        if (!d.solutions[p.id]) continue;
         workerRef.current?.postMessage({
           id: p.id,
           code: d.solutions[p.id],
           testCases: p.testCases,
         });
-      });
+        // Small delay to let the worker finish each validation before the next
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
     } finally {
       setIsAutoSolving(false);
     }
+  }
+
+  /* ═══════════════════════════════════════════════════════════
+     MOBILE GATE — <900px gets leaderboard only, no game
+     ═══════════════════════════════════════════════════════════ */
+  if (isMobile) {
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "#f9f9f9",
+          padding: "60px 24px",
+          fontFamily: "var(--font-geist-mono), monospace",
+          textAlign: "center",
+        }}
+      >
+        <span style={{ fontSize: 48, marginBottom: 20 }}>🔥</span>
+        <h1 style={{ fontSize: 28, fontWeight: 800, color: "#fa5d19", margin: "0 0 12px" }}>
+          FIRECRAWL CTF
+        </h1>
+        <p style={{ fontSize: 22, fontWeight: 700, color: "#262626", margin: "0 0 8px" }}>
+          Play on your computer
+        </p>
+        <p style={{ fontSize: 14, color: "rgba(0,0,0,0.45)", maxWidth: 360, margin: "0 0 36px" }}>
+          This challenge requires a full-sized screen. Open it on your desktop or laptop to play.
+        </p>
+
+        {/* Leaderboard always shown on mobile */}
+        <div
+          style={{
+            width: "100%",
+            maxWidth: 520,
+            background: "#ffffff",
+            border: "1px solid #e5e5e5",
+            borderRadius: 12,
+            overflow: "hidden",
+            boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+          }}
+        >
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid #e5e5e5" }}>
+                {["#", "Player", "Solved", "ELO"].map((h) => (
+                  <th key={h} style={{ padding: "12px 14px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "rgba(0,0,0,0.4)" }}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {leaderboard.length === 0 && (
+                <tr>
+                  <td colSpan={4} style={{ padding: "16px 14px", fontSize: 13, color: "rgba(0,0,0,0.4)" }}>
+                    No entries yet.
+                  </td>
+                </tr>
+              )}
+              {leaderboard.map((row, i) => (
+                <tr key={row.github} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                  <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 700, color: i < 3 ? "#fa5d19" : "rgba(0,0,0,0.3)" }}>
+                    {i + 1}
+                  </td>
+                  <td style={{ padding: "10px 14px", fontSize: 13, color: "#262626" }}>@{row.github}</td>
+                  <td style={{ padding: "10px 14px", fontSize: 13, color: row.solved === 10 ? "#1a9338" : "rgba(0,0,0,0.4)" }}>
+                    {row.solved}/10
+                  </td>
+                  <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 600, color: row.elo > 1000 ? "#fa5d19" : "rgba(0,0,0,0.4)" }}>
+                    {row.elo.toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
   }
 
   /* ═══════════════════════════════════════════════════════════
@@ -274,13 +400,14 @@ export default function Home() {
             </label>
             <input
               value={github}
-              onChange={(e) => setGithub(e.target.value)}
+              onChange={(e) => { setGithub(e.target.value); setGithubError(""); }}
               placeholder="your-handle"
+              maxLength={39}
               style={{
                 width: "100%",
                 height: 48,
                 borderRadius: 10,
-                border: "1px solid #e5e5e5",
+                border: `1px solid ${githubError ? "#dc2626" : "#e5e5e5"}`,
                 background: "#f3f3f3",
                 padding: "0 16px",
                 fontSize: 15,
@@ -290,9 +417,12 @@ export default function Home() {
                 boxSizing: "border-box",
                 transition: "border-color 0.2s",
               }}
-              onFocus={(e) => (e.target.style.borderColor = "#fa5d19")}
-              onBlur={(e) => (e.target.style.borderColor = "#e5e5e5")}
+              onFocus={(e) => (e.target.style.borderColor = githubError ? "#dc2626" : "#fa5d19")}
+              onBlur={(e) => (e.target.style.borderColor = githubError ? "#dc2626" : "#e5e5e5")}
             />
+            {githubError && (
+              <p style={{ margin: "6px 0 0", fontSize: 12, color: "#dc2626", textAlign: "left" }}>{githubError}</p>
+            )}
             {/* Primary CTA — Firecrawl branded button */}
             <button
               disabled={!github.trim()}
@@ -479,6 +609,26 @@ export default function Home() {
                 {timeUp ? "TIME" : `0:${String(secondsLeft).padStart(2, "0")}`}
               </span>
             </div>
+            {/* ── Big SUBMIT button ── */}
+            <button
+              onClick={() => void finishGame()}
+              disabled={isSubmitting || timeUp}
+              className="btn-heat"
+              style={{
+                height: 32,
+                padding: "0 20px",
+                borderRadius: 8,
+                fontSize: 13,
+                fontWeight: 800,
+                fontFamily: "inherit",
+                letterSpacing: 1,
+                cursor: isSubmitting || timeUp ? "not-allowed" : "pointer",
+                opacity: isSubmitting ? 0.7 : 1,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {isSubmitting ? "SUBMITTING..." : "FINISH & SUBMIT"}
+            </button>
           </div>
         </div>
 
@@ -656,8 +806,8 @@ export default function Home() {
           })}
         </div>
 
-        {/* ── Time's up overlay ── */}
-        {timeUp && (
+        {/* ── Time's up / submitting overlay ── */}
+        {(timeUp || isSubmitting) && (
           <div
             style={{
               position: "fixed",
@@ -671,26 +821,37 @@ export default function Home() {
           >
             <div style={{ textAlign: "center", background: "#ffffff", borderRadius: 20, padding: "48px 56px", border: "1px solid #e5e5e5", boxShadow: "0 8px 32px rgba(0,0,0,0.12)" }}>
               <p style={{ fontSize: 52, fontWeight: 800, color: solvedLocal === 10 ? "#1a9338" : "#dc2626", margin: 0 }}>
-                {solvedLocal === 10 ? "ALL CLEAR 🔥" : "TIME'S UP"}
+                {isSubmitting
+                  ? "SUBMITTING..."
+                  : solvedLocal === 10
+                    ? "ALL CLEAR 🔥"
+                    : "TIME'S UP"}
               </p>
               <p style={{ fontSize: 22, color: "rgba(0,0,0,0.45)", margin: "8px 0 0" }}>
-                {solvedLocal}/10 solved
+                {solvedLocal}/10 solved locally
               </p>
-              <button
-                onClick={() => void finishGame()}
-                className="btn-heat"
-                style={{
-                  marginTop: 32,
-                  padding: "14px 48px",
-                  borderRadius: 10,
-                  fontSize: 16,
-                  fontWeight: 800,
-                  fontFamily: "inherit",
-                  letterSpacing: 1,
-                }}
-              >
-                SEE RESULTS
-              </button>
+              {!isSubmitting && (
+                <button
+                  onClick={() => void finishGame()}
+                  className="btn-heat"
+                  style={{
+                    marginTop: 32,
+                    padding: "14px 48px",
+                    borderRadius: 10,
+                    fontSize: 16,
+                    fontWeight: 800,
+                    fontFamily: "inherit",
+                    letterSpacing: 1,
+                  }}
+                >
+                  SEE RESULTS
+                </button>
+              )}
+              {isSubmitting && (
+                <p style={{ fontSize: 14, color: "rgba(0,0,0,0.35)", marginTop: 20 }}>
+                  Validating your solutions on the server...
+                </p>
+              )}
             </div>
           </div>
         )}
@@ -812,11 +973,12 @@ export default function Home() {
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <input
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => { setEmail(e.target.value); setEmailError(""); }}
                   placeholder="Email"
-                  style={{ ...inputStyle, flex: 1 }}
-                  onFocus={(e) => (e.target.style.borderColor = "#fa5d19")}
-                  onBlur={(e) => (e.target.style.borderColor = "#e5e5e5")}
+                  maxLength={254}
+                  style={{ ...inputStyle, flex: 1, borderColor: emailError ? "#dc2626" : "#e5e5e5" }}
+                  onFocus={(e) => (e.target.style.borderColor = emailError ? "#dc2626" : "#fa5d19")}
+                  onBlur={(e) => (e.target.style.borderColor = emailError ? "#dc2626" : "#e5e5e5")}
                 />
                 <input
                   value={github}
@@ -825,11 +987,12 @@ export default function Home() {
                 />
                 <input
                   value={xHandle}
-                  onChange={(e) => setXHandle(e.target.value)}
+                  onChange={(e) => { setXHandle(e.target.value); setXHandleError(""); }}
                   placeholder="@x_handle"
-                  style={{ ...inputStyle, flex: 1 }}
-                  onFocus={(e) => (e.target.style.borderColor = "#fa5d19")}
-                  onBlur={(e) => (e.target.style.borderColor = "#e5e5e5")}
+                  maxLength={16}
+                  style={{ ...inputStyle, flex: 1, borderColor: xHandleError ? "#dc2626" : "#e5e5e5" }}
+                  onFocus={(e) => (e.target.style.borderColor = xHandleError ? "#dc2626" : "#fa5d19")}
+                  onBlur={(e) => (e.target.style.borderColor = xHandleError ? "#dc2626" : "#e5e5e5")}
                 />
                 <input
                   value={flag}
@@ -857,6 +1020,11 @@ export default function Home() {
                   SUBMIT
                 </button>
               </div>
+              {(emailError || xHandleError) && (
+                <p style={{ margin: "6px 0 0", fontSize: 12, color: "#dc2626", textAlign: "left" }}>
+                  {emailError || xHandleError}
+                </p>
+              )}
             </div>
           )}
 

@@ -5,14 +5,14 @@ import {
   selectSessionProblems,
   stripSolution,
 } from "../server/problems";
+import { validateGithub } from "../src/lib/validation";
 
 export const create = mutation({
   args: { github: v.string() },
   handler: async (ctx, args) => {
-    const github = args.github.trim();
-    if (!github) {
-      throw new Error("github is required");
-    }
+    const ghResult = validateGithub(args.github);
+    if (ghResult.ok === false) throw new Error(ghResult.error);
+    const github = ghResult.value;
 
     const picked = selectSessionProblems();
     const startedAt = Date.now();
