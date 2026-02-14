@@ -1,7 +1,6 @@
 import { v } from "convex/values";
 import { mutation } from "./_generated/server";
 import {
-  PROBLEM_BANK,
   selectSessionProblems,
   stripSolution,
 } from "../server/problems";
@@ -29,8 +28,6 @@ export const create = mutation({
       startedAt,
       expiresAt,
       problems: picked.map(stripSolution),
-      // Included for tests and server-side conveniences only.
-      allProblemIds: PROBLEM_BANK.map((problem) => problem.id),
     };
   },
 });
