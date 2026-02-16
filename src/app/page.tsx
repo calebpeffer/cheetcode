@@ -1,19 +1,34 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSession, signIn, signOut } from "next-auth/react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { GameProblem } from "@/lib/types";
 import type { Id } from "../../convex/_generated/dataModel";
-import { validateGithub, validateEmail, validateXHandle } from "@/lib/validation";
+import { validateEmail, validateXHandle } from "@/lib/validation";
 
 type Screen = "landing" | "playing" | "results";
+
+type ExploitInfo = {
+  id: string;
+  bonus: number;
+  message: string;
+};
+
+type LandmineInfo = {
+  id: string;
+  penalty: number;
+  message: string;
+};
 
 type ResultsData = {
   elo: number;
   solved: number;
   rank: number;
   timeRemaining: number;
+  exploits?: ExploitInfo[];
+  landmines?: LandmineInfo[];
 };
 
 const ROUND_MS = 45_000;
@@ -37,8 +52,12 @@ function useIsMobile() {
 }
 
 export default function Home() {
+  // GitHub identity comes from OAuth session — no manual username input
+  const { data: authSession, status: authStatus } = useSession();
+  const github = authSession?.user?.githubUsername ?? "";
+  const isAuthenticated = authStatus === "authenticated" && !!github;
+
   const [screen, setScreen] = useState<Screen>("landing");
-  const [github, setGithub] = useState("");
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [sessionId, setSessionId] = useState<Id<"sessions"> | null>(null);
   const [expiresAt, setExpiresAt] = useState(0);
@@ -54,10 +73,9 @@ export default function Home() {
   const [now, setNow] = useState(Date.now());
   const [isSubmitting, setIsSubmitting] = useState(false);
   // Inline validation error messages
-  const [githubError, setGithubError] = useState("");
   const [emailError, setEmailError] = useState("");
   const [xHandleError, setXHandleError] = useState("");
-  const workerRef = useRef<Worker | null>(null);
+  // Worker removed — validation runs through /api/validate for parity with server
   const canAutoSolve = process.env.NODE_ENV !== "production";
   const isMobile = useIsMobile();
 
@@ -66,17 +84,8 @@ export default function Home() {
   const createSession = useMutation(api.sessions.create);
   const submitLeadMutation = useMutation(api.leads.submit);
 
-  useEffect(() => {
-    workerRef.current = new Worker(
-      new URL("../workers/codeRunner.worker.ts", import.meta.url),
-    );
-    workerRef.current.onmessage = (
-      event: MessageEvent<{ id: string; passed: boolean }>,
-    ) => {
-      setLocalPass((cur) => ({ ...cur, [event.data.id]: event.data.passed }));
-    };
-    return () => workerRef.current?.terminate();
-  }, []);
+  // No worker — local validation uses the same QuickJS sandbox as final scoring
+  // via /api/validate to guarantee parity between local and server checks
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 100);
@@ -128,13 +137,11 @@ export default function Home() {
   }, [timeLeftMs, screen, finishGame]);
 
   async function startGame() {
-    // Client-side validation before hitting the server
-    const ghResult = validateGithub(github);
-    if (ghResult.ok === false) { setGithubError(ghResult.error); return; }
-    setGithubError("");
+    // GitHub username is guaranteed by OAuth — no manual validation needed
+    if (!isAuthenticated) return;
 
     try {
-      const d = await createSession({ github: ghResult.value });
+      const d = await createSession({ github });
       setSessionId(d.sessionId);
       setExpiresAt(d.expiresAt);
       setProblems(d.problems as unknown as GameProblem[]);
@@ -149,15 +156,23 @@ export default function Home() {
     }
   }
 
-  function runLocalCheck(problem: GameProblem) {
+  // Uses /api/validate (QuickJS WASM) so local checks match server scoring exactly
+  async function runLocalCheck(problem: GameProblem) {
     setLocalPass((cur) => ({ ...cur, [problem.id]: null }));
-    setTimeout(() => {
-      workerRef.current?.postMessage({
-        id: problem.id,
-        code: codes[problem.id] ?? problem.starterCode,
-        testCases: problem.testCases,
+    try {
+      const res = await fetch("/api/validate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          code: codes[problem.id] ?? problem.starterCode,
+          testCases: problem.testCases,
+        }),
       });
-    }, 300);
+      const data = await res.json();
+      setLocalPass((cur) => ({ ...cur, [problem.id]: data.passed === true }));
+    } catch {
+      setLocalPass((cur) => ({ ...cur, [problem.id]: false }));
+    }
   }
 
   async function submitLeadForm() {
@@ -196,7 +211,6 @@ export default function Home() {
     setXHandle("");
     setFlag("");
     setSubmittedLead(false);
-    setGithubError("");
     setEmailError("");
     setXHandleError("");
   }
@@ -224,16 +238,20 @@ export default function Home() {
       if (!r.ok) return;
       const d = (await r.json()) as { solutions: Record<string, string> };
       setCodes((cur) => ({ ...cur, ...d.solutions }));
-      // Stagger worker messages so each gets processed cleanly
+      // Validate each solution via /api/validate (same QuickJS sandbox as scoring)
       for (const p of problems) {
         if (!d.solutions[p.id]) continue;
-        workerRef.current?.postMessage({
-          id: p.id,
-          code: d.solutions[p.id],
-          testCases: p.testCases,
-        });
-        // Small delay to let the worker finish each validation before the next
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        try {
+          const vRes = await fetch("/api/validate", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ code: d.solutions[p.id], testCases: p.testCases }),
+          });
+          const vData = await vRes.json();
+          setLocalPass((cur) => ({ ...cur, [p.id]: vData.passed === true }));
+        } catch {
+          setLocalPass((cur) => ({ ...cur, [p.id]: false }));
+        }
       }
     } finally {
       setIsAutoSolving(false);
@@ -284,7 +302,7 @@ export default function Home() {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ borderBottom: "1px solid #e5e5e5" }}>
-                {["#", "Player", "Solved", "ELO"].map((h) => (
+                {["#", "Player", "Solved", "Tries", "ELO"].map((h) => (
                   <th key={h} style={{ padding: "12px 14px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "rgba(0,0,0,0.4)" }}>
                     {h}
                   </th>
@@ -294,7 +312,7 @@ export default function Home() {
             <tbody>
               {leaderboard.length === 0 && (
                 <tr>
-                  <td colSpan={4} style={{ padding: "16px 14px", fontSize: 13, color: "rgba(0,0,0,0.4)" }}>
+                  <td colSpan={5} style={{ padding: "16px 14px", fontSize: 13, color: "rgba(0,0,0,0.4)" }}>
                     No entries yet.
                   </td>
                 </tr>
@@ -307,6 +325,9 @@ export default function Home() {
                   <td style={{ padding: "10px 14px", fontSize: 13, color: "#262626" }}>@{row.github}</td>
                   <td style={{ padding: "10px 14px", fontSize: 13, color: row.solved === 10 ? "#1a9338" : "rgba(0,0,0,0.4)" }}>
                     {row.solved}/10
+                  </td>
+                  <td style={{ padding: "10px 14px", fontSize: 13, color: "rgba(0,0,0,0.35)" }}>
+                    {row.attempts ?? 1}
                   </td>
                   <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 600, color: row.elo > 1000 ? "#fa5d19" : "rgba(0,0,0,0.4)" }}>
                     {row.elo.toLocaleString()}
@@ -383,7 +404,7 @@ export default function Home() {
             ))}
           </div>
 
-          {/* GitHub input card */}
+          {/* Auth + Start card */}
           <div
             style={{
               maxWidth: 420,
@@ -395,52 +416,100 @@ export default function Home() {
               boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
             }}
           >
-            <label style={{ display: "block", textAlign: "left", fontSize: 12, fontWeight: 500, color: "rgba(0,0,0,0.4)", marginBottom: 8 }}>
-              github.com/
-            </label>
-            <input
-              value={github}
-              onChange={(e) => { setGithub(e.target.value); setGithubError(""); }}
-              placeholder="your-handle"
-              maxLength={39}
-              style={{
-                width: "100%",
-                height: 48,
-                borderRadius: 10,
-                border: `1px solid ${githubError ? "#dc2626" : "#e5e5e5"}`,
-                background: "#f3f3f3",
-                padding: "0 16px",
-                fontSize: 15,
-                fontFamily: "var(--font-geist-mono), monospace",
-                color: "#262626",
-                outline: "none",
-                boxSizing: "border-box",
-                transition: "border-color 0.2s",
-              }}
-              onFocus={(e) => (e.target.style.borderColor = githubError ? "#dc2626" : "#fa5d19")}
-              onBlur={(e) => (e.target.style.borderColor = githubError ? "#dc2626" : "#e5e5e5")}
-            />
-            {githubError && (
-              <p style={{ margin: "6px 0 0", fontSize: 12, color: "#dc2626", textAlign: "left" }}>{githubError}</p>
+            {authStatus === "loading" && (
+              <p style={{ fontSize: 13, color: "rgba(0,0,0,0.4)", textAlign: "center" }}>Loading...</p>
             )}
-            {/* Primary CTA — Firecrawl branded button */}
-            <button
-              disabled={!github.trim()}
-              onClick={startGame}
-              className="btn-heat"
-              style={{
-                width: "100%",
-                height: 52,
-                borderRadius: 12,
-                fontSize: 17,
-                fontWeight: 800,
-                letterSpacing: 2,
-                marginTop: 16,
-                fontFamily: "inherit",
-              }}
-            >
-              START
-            </button>
+
+            {authStatus === "unauthenticated" && (
+              <>
+                <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(0,0,0,0.4)", marginBottom: 12, textAlign: "center" }}>
+                  Sign in to play — your GitHub identity is your scoreboard entry
+                </p>
+                <button
+                  onClick={() => signIn("github")}
+                  style={{
+                    width: "100%",
+                    height: 52,
+                    borderRadius: 12,
+                    fontSize: 15,
+                    fontWeight: 700,
+                    fontFamily: "inherit",
+                    background: "#24292f",
+                    color: "#ffffff",
+                    border: "none",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 10,
+                    transition: "background 0.2s",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "#1b1f23")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "#24292f")}
+                >
+                  <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+                  </svg>
+                  Sign in with GitHub
+                </button>
+              </>
+            )}
+
+            {isAuthenticated && (
+              <>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    {authSession.user.image && (
+                      <img
+                        src={authSession.user.image}
+                        alt=""
+                        width={32}
+                        height={32}
+                        style={{ borderRadius: "50%", border: "1px solid #e5e5e5" }}
+                      />
+                    )}
+                    <div>
+                      <p style={{ fontSize: 14, fontWeight: 600, color: "#262626", margin: 0 }}>
+                        @{github}
+                      </p>
+                      <p style={{ fontSize: 11, color: "rgba(0,0,0,0.35)", margin: 0 }}>
+                        Verified via GitHub OAuth
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => signOut()}
+                    style={{
+                      fontSize: 11,
+                      color: "rgba(0,0,0,0.35)",
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      textDecoration: "underline",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    sign out
+                  </button>
+                </div>
+                {/* Primary CTA — Firecrawl branded button */}
+                <button
+                  onClick={startGame}
+                  className="btn-heat"
+                  style={{
+                    width: "100%",
+                    height: 52,
+                    borderRadius: 12,
+                    fontSize: 17,
+                    fontWeight: 800,
+                    letterSpacing: 2,
+                    fontFamily: "inherit",
+                  }}
+                >
+                  START
+                </button>
+              </>
+            )}
           </div>
 
           {/* Leaderboard toggle */}
@@ -477,7 +546,7 @@ export default function Home() {
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ borderBottom: "1px solid #e5e5e5" }}>
-                    {["#", "Player", "Solved", "ELO"].map((h) => (
+                    {["#", "Player", "Solved", "Tries", "ELO"].map((h) => (
                       <th key={h} style={{ padding: "12px 18px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "rgba(0,0,0,0.4)" }}>
                         {h}
                       </th>
@@ -487,7 +556,7 @@ export default function Home() {
                 <tbody>
                   {leaderboard.length === 0 && (
                     <tr>
-                      <td colSpan={4} style={{ padding: "16px 18px", fontSize: 13, color: "rgba(0,0,0,0.4)" }}>
+                      <td colSpan={5} style={{ padding: "16px 18px", fontSize: 13, color: "rgba(0,0,0,0.4)" }}>
                         No entries yet.
                       </td>
                     </tr>
@@ -500,6 +569,9 @@ export default function Home() {
                       <td style={{ padding: "10px 18px", fontSize: 13, color: "#262626" }}>@{row.github}</td>
                       <td style={{ padding: "10px 18px", fontSize: 13, color: row.solved === 10 ? "#1a9338" : "rgba(0,0,0,0.4)" }}>
                         {row.solved}/10
+                      </td>
+                      <td style={{ padding: "10px 18px", fontSize: 13, color: "rgba(0,0,0,0.35)" }}>
+                        {row.attempts ?? 1}
                       </td>
                       <td style={{ padding: "10px 18px", fontSize: 13, fontWeight: 600, color: row.elo > 1000 ? "#fa5d19" : "rgba(0,0,0,0.4)" }}>
                         {row.elo.toLocaleString()}
@@ -965,6 +1037,69 @@ export default function Home() {
                 </p>
               </div>
             ))}
+          </div>
+
+          {/* ── Score Breakdown — always visible so players learn what's possible ── */}
+          <div style={{ marginTop: 28, textAlign: "left" }}>
+            <p style={{ fontSize: 13, fontWeight: 700, color: "#262626", margin: "0 0 14px", textTransform: "uppercase", letterSpacing: 1 }}>
+              Score Breakdown
+            </p>
+
+            {/* Base score */}
+            <div style={{ background: "#f3f3f3", borderRadius: 10, padding: "14px 18px", marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                <span style={{ color: "rgba(0,0,0,0.5)" }}>Base score ({results.solved}/10 solved, {results.timeRemaining}s remaining)</span>
+                <span style={{ fontWeight: 700, color: "#262626" }}>
+                  {results.elo - (results.exploits ?? []).reduce((s, e) => s + e.bonus, 0) - (results.landmines ?? []).reduce((s, l) => s + l.penalty, 0)}
+                </span>
+              </div>
+            </div>
+
+            {/* ── Exploits — only show what they found, no hints about what they missed ── */}
+            <div style={{ borderRadius: 10, border: "1px solid #e5e5e5", overflow: "hidden", marginBottom: 10 }}>
+              <div style={{ padding: "10px 18px", background: "#f9f9f9", borderBottom: "1px solid #e5e5e5" }}>
+                <p style={{ fontSize: 11, fontWeight: 700, color: "#fa5d19", margin: 0, textTransform: "uppercase", letterSpacing: 1 }}>
+                  Exploits
+                </p>
+              </div>
+              {(results.exploits ?? []).length > 0 ? (results.exploits ?? []).map((e) => (
+                <div key={e.id} style={{ padding: "8px 18px", borderBottom: "1px solid #f0f0f0", display: "flex", alignItems: "center", gap: 10, background: "rgba(26,147,56,0.04)" }}>
+                  <span style={{ fontSize: 14, width: 20, textAlign: "center", flexShrink: 0 }}>✓</span>
+                  <span style={{ fontSize: 11, color: "#262626", flex: 1, lineHeight: 1.5 }}>{e.message}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#1a9338", flexShrink: 0 }}>+{e.bonus}</span>
+                </div>
+              )) : (
+                <div style={{ padding: "12px 18px", fontSize: 12, color: "rgba(0,0,0,0.35)" }}>
+                  No exploits found. There are hidden vulnerabilities in this system worth bonus ELO. Keep looking.
+                </div>
+              )}
+            </div>
+
+            {/* ── Landmines — only show what they triggered ── */}
+            <div style={{ borderRadius: 10, border: "1px solid #e5e5e5", overflow: "hidden", marginBottom: 10 }}>
+              <div style={{ padding: "10px 18px", background: "#f9f9f9", borderBottom: "1px solid #e5e5e5" }}>
+                <p style={{ fontSize: 11, fontWeight: 700, color: (results.landmines ?? []).length > 0 ? "#dc2626" : "#1a9338", margin: 0, textTransform: "uppercase", letterSpacing: 1 }}>
+                  Safety
+                </p>
+              </div>
+              {(results.landmines ?? []).length > 0 ? (results.landmines ?? []).map((l) => (
+                <div key={l.id} style={{ padding: "8px 18px", borderBottom: "1px solid #f0f0f0", display: "flex", alignItems: "center", gap: 10, background: "rgba(220,38,38,0.04)" }}>
+                  <span style={{ fontSize: 14, width: 20, textAlign: "center", flexShrink: 0 }}>✗</span>
+                  <span style={{ fontSize: 11, color: "#262626", flex: 1, lineHeight: 1.5 }}>{l.message}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#dc2626", flexShrink: 0 }}>{l.penalty}</span>
+                </div>
+              )) : (
+                <div style={{ padding: "12px 18px", fontSize: 12, color: "#1a9338" }}>
+                  Clean — no safety issues detected.
+                </div>
+              )}
+            </div>
+
+            {/* Final ELO */}
+            <div style={{ background: "#262626", borderRadius: 10, padding: "14px 18px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.7)", textTransform: "uppercase", letterSpacing: 1 }}>Final ELO</span>
+              <span style={{ fontSize: 22, fontWeight: 800, color: "#fa5d19" }}>{results.elo.toLocaleString()}</span>
+            </div>
           </div>
 
           {/* Capture form — inline row */}

@@ -15,6 +15,8 @@ export default defineSchema({
     timeSecs: v.number(),
     elo: v.number(),
     sessionId: v.id("sessions"),
+    // Track total attempts per user — visible on the leaderboard
+    attempts: v.optional(v.number()),
   })
     .index("by_elo", ["elo"])
     .index("by_github", ["github"]),

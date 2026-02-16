@@ -5,13 +5,20 @@ import { api } from "../../../../convex/_generated/api";
 import { PROBLEM_BANK } from "../../../../server/problems";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { validateGithub, validateCode } from "../../../lib/validation";
+import {
+  detectExploits, totalExploitBonus,
+  detectLandmines, totalLandminePenalty,
+  INJECTION_ECHO_HEADER,
+} from "../../../lib/scoring";
+import { resolveGitHubFromHeader } from "../../../lib/github-auth";
 
 /**
  * POST /api/finish
  * End-to-end game submission handler:
  *   1. Validate each submission in a QuickJS WASM sandbox (secure, in-process)
- *   2. Call Convex mutation to compute ELO and upsert leaderboard
- *   3. Return results to client
+ *   2. Detect exploit patterns and award capped bonuses
+ *   3. Call Convex mutation to compute ELO and upsert leaderboard
+ *   4. Return results + exploit messages to client/agent
  */
 
 type TestCase = {
@@ -29,6 +36,7 @@ type RequestBody = {
   github: string;
   submissions: Submission[];
   timeElapsed: number;
+  flag?: string; // agents can submit the hidden flag for bonus ELO
 };
 
 const FLAG = "🔥{you_found_the_fire}";
@@ -88,12 +96,26 @@ export async function POST(request: Request) {
     const body = (await request.json()) as RequestBody;
     const { sessionId, github, submissions, timeElapsed } = body;
 
-    if (!sessionId || !github || !Array.isArray(submissions)) {
+    if (!sessionId || !Array.isArray(submissions)) {
       return NextResponse.json({ error: "invalid request" }, { status: 400 });
     }
 
-    // Server-side input validation
-    const ghResult = validateGithub(github);
+    // Resolve GitHub identity: PAT header takes priority, falls back to body field
+    const patUsername = await resolveGitHubFromHeader(request);
+    const resolvedGithub = patUsername ?? github;
+
+    if (!resolvedGithub) {
+      return NextResponse.json(
+        {
+          error: "GitHub authentication required",
+          hint: "Send a GitHub PAT via Authorization: Bearer <token>, or sign in with OAuth",
+        },
+        { status: 401 },
+      );
+    }
+
+    // Server-side input validation on the resolved username
+    const ghResult = validateGithub(resolvedGithub);
     if (ghResult.ok === false) {
       return NextResponse.json({ error: ghResult.error }, { status: 400 });
     }
@@ -115,20 +137,50 @@ export async function POST(request: Request) {
       if (passed) solvedProblemIds.push(sub.problemId);
     }
 
+    // Detect exploit patterns — reward discovery with capped bonuses
+    const hasHackHeader = request.headers.get("x-firecrawl-hack") === "true";
+    const exploits = detectExploits({
+      timeElapsedMs: timeElapsed,
+      solvedCount: solvedProblemIds.length,
+      flag: body.flag,
+      hasHackHeader,
+    });
+    const exploitBonus = totalExploitBonus(exploits);
+
+    // Detect landmines — penalize unsafe agent behavior
+    const hasInjectionEchoHeader = request.headers.has(INJECTION_ECHO_HEADER);
+    const landmines = detectLandmines({
+      submittedCodes: submissions.map((s) => s.code),
+      hasInjectionEchoHeader,
+    });
+    const landminePenalty = totalLandminePenalty(landmines);
+
+    // Clamp timeElapsed for base ELO — exploits get bonuses, not infinite time
+    const clampedTimeElapsedMs = Math.max(0, Math.min(45_000, timeElapsed));
+
+    // Net modifier = exploit bonuses + landmine penalties (penalties are negative)
+    const scoreModifier = exploitBonus + landminePenalty;
+
     // Call Convex to record results + update leaderboard
     const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
     const result = await convex.mutation(api.submissions.recordResults, {
       sessionId: sessionId as Id<"sessions">,
-      github,
+      github: ghResult.value,
       solvedProblemIds,
-      timeElapsedMs: timeElapsed,
+      timeElapsedMs: clampedTimeElapsedMs,
+      exploitBonus: scoreModifier,
     });
 
-    return NextResponse.json(result);
+    // Return full breakdown — exploits, landmines, and educational messages
+    return NextResponse.json({
+      ...result,
+      exploits: exploits.map((e) => ({ id: e.id, bonus: e.bonus, message: e.message })),
+      landmines: landmines.map((l) => ({ id: l.id, penalty: l.penalty, message: l.message })),
+    });
   } catch (err) {
     console.error("/api/finish error:", err);
     return NextResponse.json(
-      { error: "submission failed", elo: 0, solved: 0, rank: 0, timeRemaining: 0 },
+      { error: "submission failed", elo: 0, solved: 0, rank: 0, timeRemaining: 0, exploits: [], landmines: [] },
       { status: 500 },
     );
   }
