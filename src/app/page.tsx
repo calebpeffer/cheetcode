@@ -1055,45 +1055,41 @@ export default function Home() {
               </div>
             </div>
 
-            {/* ── Exploits — only show what they found, no hints about what they missed ── */}
-            <div style={{ borderRadius: 10, border: "1px solid #e5e5e5", overflow: "hidden", marginBottom: 10 }}>
-              <div style={{ padding: "10px 18px", background: "#f9f9f9", borderBottom: "1px solid #e5e5e5" }}>
-                <p style={{ fontSize: 11, fontWeight: 700, color: "#fa5d19", margin: 0, textTransform: "uppercase", letterSpacing: 1 }}>
-                  Exploits
-                </p>
+            {/* ── Exploits — only visible if they found any ── */}
+            {(results.exploits ?? []).length > 0 && (
+              <div style={{ borderRadius: 10, border: "1px solid rgba(250,93,25,0.2)", overflow: "hidden", marginBottom: 10, background: "rgba(250,93,25,0.03)" }}>
+                <div style={{ padding: "10px 18px", background: "rgba(250,93,25,0.06)", borderBottom: "1px solid rgba(250,93,25,0.15)" }}>
+                  <p style={{ fontSize: 11, fontWeight: 700, color: "#fa5d19", margin: 0, textTransform: "uppercase", letterSpacing: 1 }}>
+                    Exploits
+                  </p>
+                </div>
+                {(results.exploits ?? []).map((e) => (
+                  <div key={e.id} style={{ padding: "8px 18px", borderBottom: "1px solid rgba(250,93,25,0.1)", display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 14, width: 20, textAlign: "center", flexShrink: 0 }}>✓</span>
+                    <span style={{ fontSize: 11, color: "#262626", flex: 1, lineHeight: 1.5 }}>{e.message}</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "#1a9338", flexShrink: 0 }}>+{e.bonus}</span>
+                  </div>
+                ))}
               </div>
-              {(results.exploits ?? []).length > 0 ? (results.exploits ?? []).map((e) => (
-                <div key={e.id} style={{ padding: "8px 18px", borderBottom: "1px solid #f0f0f0", display: "flex", alignItems: "center", gap: 10, background: "rgba(26,147,56,0.04)" }}>
-                  <span style={{ fontSize: 14, width: 20, textAlign: "center", flexShrink: 0 }}>✓</span>
-                  <span style={{ fontSize: 11, color: "#262626", flex: 1, lineHeight: 1.5 }}>{e.message}</span>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: "#1a9338", flexShrink: 0 }}>+{e.bonus}</span>
-                </div>
-              )) : (
-                <div style={{ padding: "12px 18px", fontSize: 12, color: "rgba(0,0,0,0.35)" }}>
-                  No exploits found. There are hidden vulnerabilities in this system worth bonus ELO. Keep looking.
-                </div>
-              )}
-            </div>
+            )}
 
-            {/* ── Landmines — only show what they triggered ── */}
-            <div style={{ borderRadius: 10, border: "1px solid #e5e5e5", overflow: "hidden", marginBottom: 10 }}>
-              <div style={{ padding: "10px 18px", background: "#f9f9f9", borderBottom: "1px solid #e5e5e5" }}>
-                <p style={{ fontSize: 11, fontWeight: 700, color: (results.landmines ?? []).length > 0 ? "#dc2626" : "#1a9338", margin: 0, textTransform: "uppercase", letterSpacing: 1 }}>
-                  Safety
-                </p>
+            {/* ── Landmines — only visible if they triggered any ── */}
+            {(results.landmines ?? []).length > 0 && (
+              <div style={{ borderRadius: 10, border: "1px solid rgba(220,38,38,0.2)", overflow: "hidden", marginBottom: 10, background: "rgba(220,38,38,0.03)" }}>
+                <div style={{ padding: "10px 18px", background: "rgba(220,38,38,0.06)", borderBottom: "1px solid rgba(220,38,38,0.15)" }}>
+                  <p style={{ fontSize: 11, fontWeight: 700, color: "#dc2626", margin: 0, textTransform: "uppercase", letterSpacing: 1 }}>
+                    Safety Issues
+                  </p>
+                </div>
+                {(results.landmines ?? []).map((l) => (
+                  <div key={l.id} style={{ padding: "8px 18px", borderBottom: "1px solid rgba(220,38,38,0.1)", display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 14, width: 20, textAlign: "center", flexShrink: 0 }}>✗</span>
+                    <span style={{ fontSize: 11, color: "#262626", flex: 1, lineHeight: 1.5 }}>{l.message}</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "#dc2626", flexShrink: 0 }}>{l.penalty}</span>
+                  </div>
+                ))}
               </div>
-              {(results.landmines ?? []).length > 0 ? (results.landmines ?? []).map((l) => (
-                <div key={l.id} style={{ padding: "8px 18px", borderBottom: "1px solid #f0f0f0", display: "flex", alignItems: "center", gap: 10, background: "rgba(220,38,38,0.04)" }}>
-                  <span style={{ fontSize: 14, width: 20, textAlign: "center", flexShrink: 0 }}>✗</span>
-                  <span style={{ fontSize: 11, color: "#262626", flex: 1, lineHeight: 1.5 }}>{l.message}</span>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: "#dc2626", flexShrink: 0 }}>{l.penalty}</span>
-                </div>
-              )) : (
-                <div style={{ padding: "12px 18px", fontSize: 12, color: "#1a9338" }}>
-                  Clean — no safety issues detected.
-                </div>
-              )}
-            </div>
+            )}
 
             {/* Final ELO */}
             <div style={{ background: "#262626", borderRadius: 10, padding: "14px 18px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
