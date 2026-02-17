@@ -360,11 +360,19 @@ export default function Home() {
       >
         <div style={{ width: "100%", maxWidth: 600, textAlign: "center" }}>
           {/* Logo */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 40 }}>
-            <span style={{ fontSize: 40 }}>🔥</span>
-            <h1 style={{ fontSize: 36, fontWeight: 800, color: "#fa5d19", margin: 0, letterSpacing: -1 }}>
-              FIRECRAWL CTF
-            </h1>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 40 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ fontSize: 40 }}>🔥</span>
+              <h1 style={{ fontSize: 36, fontWeight: 800, color: "#fa5d19", margin: 0, letterSpacing: -1 }}>
+                FIRECRAWL CTF
+              </h1>
+            </div>
+            <a
+              href="https://ctf.firecrawl.dev"
+              style={{ fontSize: 12, color: "rgba(0,0,0,0.3)", marginTop: 6, textDecoration: "none", fontWeight: 500 }}
+            >
+              ctf.firecrawl.dev
+            </a>
           </div>
 
           {/* Headline card */}
