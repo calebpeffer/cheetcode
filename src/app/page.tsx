@@ -368,10 +368,10 @@ export default function Home() {
               </h1>
             </div>
             <a
-              href="https://ctf.firecrawl.dev"
+              href="https://cheetcode-ctf.firecrawl.dev"
               style={{ fontSize: 12, color: "rgba(0,0,0,0.3)", marginTop: 6, textDecoration: "none", fontWeight: 500 }}
             >
-              ctf.firecrawl.dev
+              cheetcode-ctf.firecrawl.dev
             </a>
           </div>
 

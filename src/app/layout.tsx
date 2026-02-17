@@ -15,14 +15,14 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://ctf.firecrawl.dev"),
-  title: "Firecrawl CTF",
+  metadataBase: new URL("https://cheetcode-ctf.firecrawl.dev"),
+  title: "CheetCode CTF",
   description: "10 problems. 45 seconds. Good luck.",
   openGraph: {
-    title: "Firecrawl CTF",
+    title: "CheetCode CTF",
     description: "10 problems. 45 seconds. Good luck.",
-    url: "https://ctf.firecrawl.dev",
-    siteName: "Firecrawl CTF",
+    url: "https://cheetcode-ctf.firecrawl.dev",
+    siteName: "CheetCode CTF",
     images: [{ url: "/opengraph-image" }],
   },
 };
