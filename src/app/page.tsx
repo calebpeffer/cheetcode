@@ -36,6 +36,8 @@ const MOBILE_BREAKPOINT = 900;
 
 /** Original announcement tweet — every share quote-tweets this to amplify it.
  *  Replace with the real tweet URL once published. */
+// TODO: Replace with the announcement tweet URL after posting tomorrow.
+// Every "SHARE ON X" click quote-tweets this URL to amplify it.
 const ORIGINAL_TWEET_URL = "https://x.com/fiabordarlan/status/1890614024413831618";
 
 /** True when viewport < 900px — gate gameplay on small screens */
@@ -218,7 +220,7 @@ export default function Home() {
   async function shareScore() {
     if (!results) return;
     // Quote-tweet the original announcement so every share amplifies it
-    const text = `I just scored ${results.elo} on the Firecrawl CTF — 10 problems, 45 seconds. 🔥 Think you can beat it?`;
+    const text = `I just scored ${results.elo.toLocaleString()} (rank #${results.rank}) on CheetCode CTF — 10 problems, 45 seconds. Think your agent can beat it? 🔥`;
     const tweetUrl =
       `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(ORIGINAL_TWEET_URL)}`;
     await navigator.clipboard.writeText(`${text} ${ORIGINAL_TWEET_URL}`);
@@ -302,7 +304,7 @@ export default function Home() {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ borderBottom: "1px solid #e5e5e5" }}>
-                {["#", "Player", "Solved", "Tries", "ELO"].map((h) => (
+                {["#", "Player", "Solved", "Tries", "Score"].map((h) => (
                   <th key={h} style={{ padding: "12px 14px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "rgba(0,0,0,0.4)" }}>
                     {h}
                   </th>
@@ -554,7 +556,7 @@ export default function Home() {
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ borderBottom: "1px solid #e5e5e5" }}>
-                    {["#", "Player", "Solved", "Tries", "ELO"].map((h) => (
+                    {["#", "Player", "Solved", "Tries", "Score"].map((h) => (
                       <th key={h} style={{ padding: "12px 18px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "rgba(0,0,0,0.4)" }}>
                         {h}
                       </th>
@@ -1025,7 +1027,7 @@ export default function Home() {
           >
             {[
               { label: "Solved", value: `${results.solved}/10`, color: "#262626" },
-              { label: "ELO", value: results.elo.toLocaleString(), color: "#fa5d19" },
+              { label: "Score", value: results.elo.toLocaleString(), color: "#fa5d19" },
               { label: "Rank", value: `#${results.rank}`, color: "#262626" },
             ].map((stat, i) => (
               <div
@@ -1099,9 +1101,9 @@ export default function Home() {
               </div>
             )}
 
-            {/* Final ELO */}
+            {/* Final Score */}
             <div style={{ background: "#262626", borderRadius: 10, padding: "14px 18px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.7)", textTransform: "uppercase", letterSpacing: 1 }}>Final ELO</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.7)", textTransform: "uppercase", letterSpacing: 1 }}>Final Score</span>
               <span style={{ fontSize: 22, fontWeight: 800, color: "#fa5d19" }}>{results.elo.toLocaleString()}</span>
             </div>
           </div>
