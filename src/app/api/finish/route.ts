@@ -120,14 +120,31 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: ghResult.error }, { status: 400 });
     }
 
+    // Fetch session to get the assigned problem IDs
+    const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+    const session = await convex.query(api.submissions.getSession, {
+      sessionId: sessionId as Id<"sessions">,
+    });
+    if (!session) {
+      return NextResponse.json({ error: "session not found" }, { status: 404 });
+    }
+    const sessionProblemIds = new Set(session.problemIds);
+
     // Load QuickJS WASM once, reuse for all problems
     const qjs = await getQJS();
 
-    // Validate each submission (one VM per problem, all test cases inside it)
+    // Validate each submission — only accept problems assigned to this session
     const solvedProblemIds: string[] = [];
+    let extraSubmissions = 0;
     for (const sub of submissions) {
       const problem = PROBLEM_BANK.find((p) => p.id === sub.problemId);
       if (!problem || !sub.code.trim()) continue;
+
+      // Track submissions for problems outside this session
+      if (!sessionProblemIds.has(sub.problemId)) {
+        extraSubmissions++;
+        continue;
+      }
 
       // Reject oversized code submissions
       const codeResult = validateCode(sub.code);
@@ -144,6 +161,7 @@ export async function POST(request: Request) {
       solvedCount: solvedProblemIds.length,
       flag: body.flag,
       hasHackHeader,
+      extraSubmissions,
     });
     const exploitBonus = totalExploitBonus(exploits);
 
@@ -161,8 +179,7 @@ export async function POST(request: Request) {
     // Net modifier = exploit bonuses + landmine penalties (penalties are negative)
     const scoreModifier = exploitBonus + landminePenalty;
 
-    // Call Convex to record results + update leaderboard
-    const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+    // Record results + update leaderboard
     const result = await convex.mutation(api.submissions.recordResults, {
       sessionId: sessionId as Id<"sessions">,
       github: ghResult.value,

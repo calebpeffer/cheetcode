@@ -44,6 +44,7 @@ export function detectExploits(params: {
   solvedCount: number;
   flag?: string;
   hasHackHeader: boolean;
+  extraSubmissions?: number;
 }): ExploitReward[] {
   const rewards: ExploitReward[] = [];
 
@@ -91,7 +92,19 @@ export function detectExploits(params: {
     });
   }
 
-  // Exploit 5: Sent timeElapsed > 2× round duration — boundary probing
+  // Exploit 5: Submitted solutions for problems outside the session
+  if (params.extraSubmissions && params.extraSubmissions > 0) {
+    rewards.push({
+      id: "problem_hoarder",
+      bonus: 150,
+      message:
+        "🗂️ PROBLEM HOARDER — You submitted solutions for problems outside your session. " +
+        "The server validated against the full problem bank instead of your assigned 10. " +
+        "Nice discovery — but we've capped it now. +150",
+    });
+  }
+
+  // Exploit 6: Sent timeElapsed > 2× round duration — boundary probing
   if (params.timeElapsedMs > 90_000) {
     rewards.push({
       id: "overflow_artist",
