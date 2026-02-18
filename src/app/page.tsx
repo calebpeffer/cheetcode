@@ -36,9 +36,7 @@ const MOBILE_BREAKPOINT = 900;
 
 /** Original announcement tweet — every share quote-tweets this to amplify it.
  *  Replace with the real tweet URL once published. */
-// TODO: Replace with the announcement tweet URL after posting tomorrow.
-// Every "SHARE ON X" click quote-tweets this URL to amplify it.
-const ORIGINAL_TWEET_URL = "https://x.com/fiabordarlan/status/1890614024413831618";
+const ORIGINAL_TWEET_URL = "https://x.com/CalebPeffer/status/2024167056372097131";
 
 /** True when viewport < 900px — gate gameplay on small screens */
 function useIsMobile() {
