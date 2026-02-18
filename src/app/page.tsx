@@ -34,9 +34,9 @@ type ResultsData = {
 const ROUND_MS = 45_000;
 const MOBILE_BREAKPOINT = 900;
 
-/** Original announcement tweet — every share quote-tweets this to amplify it.
- *  Replace with the real tweet URL once published. */
+/** Original announcement tweet — every share quote-tweets this to amplify it. */
 const ORIGINAL_TWEET_URL = "https://x.com/CalebPeffer/status/2024167056372097131";
+const ORIGINAL_TWEET_ID = "2024167056372097131";
 
 /** True when viewport < 900px — gate gameplay on small screens */
 function useIsMobile() {
@@ -217,10 +217,10 @@ export default function Home() {
 
   async function shareScore() {
     if (!results) return;
-    // Quote-tweet the original announcement so every share amplifies it
     const text = `I just scored ${results.elo.toLocaleString()} (rank #${results.rank}) on CheetCode CTF — 10 problems, 45 seconds. Think your agent can beat it? 🔥`;
+    // Use quote_tweet_id so X renders a proper quote-tweet instead of a bare link
     const tweetUrl =
-      `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(ORIGINAL_TWEET_URL)}`;
+      `https://x.com/intent/post?text=${encodeURIComponent(text)}&quote_tweet_id=${ORIGINAL_TWEET_ID}`;
     await navigator.clipboard.writeText(`${text} ${ORIGINAL_TWEET_URL}`);
     window.open(tweetUrl, "_blank", "noopener,noreferrer");
   }
