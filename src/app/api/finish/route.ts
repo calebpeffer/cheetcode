@@ -154,11 +154,16 @@ export async function POST(request: Request) {
       if (passed) solvedProblemIds.push(sub.problemId);
     }
 
+    // Deduplicate solved IDs — prevents inflating solvedCount by submitting the
+    // same problem multiple times in one request (each would pass validation and
+    // get pushed to the array, but they represent the same solved problem).
+    const uniqueSolvedProblemIds = [...new Set(solvedProblemIds)];
+
     // Detect exploit patterns — reward discovery with capped bonuses
     const hasHackHeader = request.headers.get("x-firecrawl-hack") === "true";
     const exploits = detectExploits({
       timeElapsedMs: timeElapsed,
-      solvedCount: solvedProblemIds.length,
+      solvedCount: uniqueSolvedProblemIds.length,
       flag: body.flag,
       hasHackHeader,
       extraSubmissions,
@@ -180,12 +185,13 @@ export async function POST(request: Request) {
     const scoreModifier = exploitBonus + landminePenalty;
 
     // Record results + update leaderboard
-    const result = await convex.mutation(api.submissions.recordResults, {
+    const result = await convex.action(api.submissions.submitResults, {
       sessionId: sessionId as Id<"sessions">,
       github: ghResult.value,
-      solvedProblemIds,
+      solvedProblemIds: uniqueSolvedProblemIds,
       timeElapsedMs: clampedTimeElapsedMs,
       exploitBonus: scoreModifier,
+      serverToken: process.env.CONVEX_SERVER_TOKEN!,
     });
 
     // Return full breakdown — exploits, landmines, and educational messages
