@@ -180,12 +180,13 @@ export async function POST(request: Request) {
     const scoreModifier = exploitBonus + landminePenalty;
 
     // Record results + update leaderboard
-    const result = await convex.mutation(api.submissions.recordResults, {
+    const result = await convex.action(api.submissions.submitResults, {
       sessionId: sessionId as Id<"sessions">,
       github: ghResult.value,
       solvedProblemIds,
       timeElapsedMs: clampedTimeElapsedMs,
       exploitBonus: scoreModifier,
+      serverToken: process.env.CONVEX_SERVER_TOKEN!,
     });
 
     // Return full breakdown — exploits, landmines, and educational messages

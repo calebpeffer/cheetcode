@@ -1,5 +1,6 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internalMutation, action, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { PROBLEM_BANK } from "../server/problems";
 import { computeElo, getDifficultyBonus } from "../src/lib/scoring";
 
@@ -11,7 +12,7 @@ import { computeElo, getDifficultyBonus } from "../src/lib/scoring";
  * exploitBonus is computed by the API route from detected exploit patterns
  * (e.g., negative time, hidden flag). It's a capped additive bonus.
  */
-export const recordResults = mutation({
+export const recordResults = internalMutation({
   args: {
     sessionId: v.id("sessions"),
     github: v.string(),
@@ -92,6 +93,30 @@ export const recordResults = mutation({
     const rank = rankIdx === -1 ? sorted.length + 1 : rankIdx + 1;
 
     return { elo, solved: solvedCount, rank, timeRemaining: timeRemainingSecs };
+  },
+});
+
+/**
+ * submitResults — public action callable by the Next.js /api/finish route.
+ * Validates a shared server secret before delegating to the internalMutation,
+ * which is not reachable from any external HTTP client on its own.
+ */
+export const submitResults = action({
+  args: {
+    sessionId: v.id("sessions"),
+    github: v.string(),
+    solvedProblemIds: v.array(v.string()),
+    timeElapsedMs: v.number(),
+    exploitBonus: v.optional(v.number()),
+    serverToken: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const expected = process.env.CONVEX_SERVER_TOKEN;
+    if (!expected || args.serverToken !== expected) {
+      throw new Error("unauthorized");
+    }
+    const { serverToken: _, ...rest } = args;
+    return await ctx.runMutation(internal.submissions.recordResults, rest);
   },
 });
 
