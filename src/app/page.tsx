@@ -220,10 +220,10 @@ export default function Home() {
   async function shareScore() {
     if (!results) return;
     const text = `I just scored ${results.elo.toLocaleString()} (rank #${results.rank}) on CheetCode CTF — 10 problems, 45 seconds. Think your agent can beat it? 🔥`;
-    // Pass original tweet as url param — X auto-converts it into a quote tweet
-    const tweetUrl =
-      `https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(ORIGINAL_TWEET_URL)}`;
-    await navigator.clipboard.writeText(`${text} ${ORIGINAL_TWEET_URL}`);
+    // Include tweet URL in the text body — X auto-renders it as a quote tweet
+    const fullText = `${text}\n\n${ORIGINAL_TWEET_URL}`;
+    const tweetUrl = `https://x.com/intent/post?text=${encodeURIComponent(fullText)}`;
+    await navigator.clipboard.writeText(fullText);
     window.open(tweetUrl, "_blank", "noopener,noreferrer");
   }
 
