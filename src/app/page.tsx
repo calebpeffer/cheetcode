@@ -81,6 +81,8 @@ export default function Home() {
 
   // ── Convex hooks (read-only — all mutations go through authenticated API routes) ──
   const leaderboard = useQuery(api.leaderboard.getAll) ?? [];
+  const [lbPage, setLbPage] = useState(0);
+  const LB_PAGE_SIZE = 25;
 
   // No worker — local validation uses the same QuickJS sandbox as final scoring
   // via /api/validate to guarantee parity between local and server checks
@@ -290,55 +292,86 @@ export default function Home() {
         </p>
 
         {/* Leaderboard always shown on mobile */}
-        <div
-          style={{
-            width: "100%",
-            maxWidth: 520,
-            background: "#ffffff",
-            border: "1px solid #e5e5e5",
-            borderRadius: 12,
-            overflow: "hidden",
-            boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-          }}
-        >
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ borderBottom: "1px solid #e5e5e5" }}>
-                {["#", "Player", "Solved", "Tries", "Score"].map((h) => (
-                  <th key={h} style={{ padding: "12px 14px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "rgba(0,0,0,0.4)" }}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {leaderboard.length === 0 && (
-                <tr>
-                  <td colSpan={5} style={{ padding: "16px 14px", fontSize: 13, color: "rgba(0,0,0,0.4)" }}>
-                    No entries yet.
-                  </td>
-                </tr>
+        {(() => {
+          const totalPages = Math.max(1, Math.ceil(leaderboard.length / LB_PAGE_SIZE));
+          const page = Math.min(lbPage, totalPages - 1);
+          const slice = leaderboard.slice(page * LB_PAGE_SIZE, (page + 1) * LB_PAGE_SIZE);
+          return (
+            <div style={{ width: "100%", maxWidth: 520 }}>
+              <div
+                style={{
+                  background: "#ffffff",
+                  border: "1px solid #e5e5e5",
+                  borderRadius: 12,
+                  overflow: "hidden",
+                  boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+                }}
+              >
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid #e5e5e5" }}>
+                      {["#", "Player", "Solved", "Tries", "Score"].map((h) => (
+                        <th key={h} style={{ padding: "12px 14px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "rgba(0,0,0,0.4)" }}>
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {slice.length === 0 && (
+                      <tr>
+                        <td colSpan={5} style={{ padding: "16px 14px", fontSize: 13, color: "rgba(0,0,0,0.4)" }}>
+                          No entries yet.
+                        </td>
+                      </tr>
+                    )}
+                    {slice.map((row, i) => {
+                      const rank = page * LB_PAGE_SIZE + i + 1;
+                      return (
+                        <tr key={row.github} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                          <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 700, color: rank <= 3 ? "#fa5d19" : "rgba(0,0,0,0.3)" }}>
+                            {rank}
+                          </td>
+                          <td style={{ padding: "10px 14px", fontSize: 13, color: "#262626" }}>@{row.github}</td>
+                          <td style={{ padding: "10px 14px", fontSize: 13, color: row.solved === 10 ? "#1a9338" : "rgba(0,0,0,0.4)" }}>
+                            {row.solved}/10
+                          </td>
+                          <td style={{ padding: "10px 14px", fontSize: 13, color: "rgba(0,0,0,0.35)" }}>
+                            {row.attempts ?? 1}
+                          </td>
+                          <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 600, color: row.elo > 1000 ? "#fa5d19" : "rgba(0,0,0,0.4)" }}>
+                            {row.elo.toLocaleString()}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {totalPages > 1 && (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 16, marginTop: 12 }}>
+                  <button
+                    onClick={() => setLbPage((p) => Math.max(0, p - 1))}
+                    disabled={page === 0}
+                    style={{ fontSize: 12, fontWeight: 600, fontFamily: "inherit", background: "none", border: "1px solid #e5e5e5", borderRadius: 6, padding: "6px 14px", cursor: page === 0 ? "not-allowed" : "pointer", color: page === 0 ? "rgba(0,0,0,0.2)" : "#262626" }}
+                  >
+                    Prev
+                  </button>
+                  <span style={{ fontSize: 12, color: "rgba(0,0,0,0.4)" }}>
+                    {page + 1} / {totalPages}
+                  </span>
+                  <button
+                    onClick={() => setLbPage((p) => Math.min(totalPages - 1, p + 1))}
+                    disabled={page >= totalPages - 1}
+                    style={{ fontSize: 12, fontWeight: 600, fontFamily: "inherit", background: "none", border: "1px solid #e5e5e5", borderRadius: 6, padding: "6px 14px", cursor: page >= totalPages - 1 ? "not-allowed" : "pointer", color: page >= totalPages - 1 ? "rgba(0,0,0,0.2)" : "#262626" }}
+                  >
+                    Next
+                  </button>
+                </div>
               )}
-              {leaderboard.map((row, i) => (
-                <tr key={row.github} style={{ borderBottom: "1px solid #f0f0f0" }}>
-                  <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 700, color: i < 3 ? "#fa5d19" : "rgba(0,0,0,0.3)" }}>
-                    {i + 1}
-                  </td>
-                  <td style={{ padding: "10px 14px", fontSize: 13, color: "#262626" }}>@{row.github}</td>
-                  <td style={{ padding: "10px 14px", fontSize: 13, color: row.solved === 10 ? "#1a9338" : "rgba(0,0,0,0.4)" }}>
-                    {row.solved}/10
-                  </td>
-                  <td style={{ padding: "10px 14px", fontSize: 13, color: "rgba(0,0,0,0.35)" }}>
-                    {row.attempts ?? 1}
-                  </td>
-                  <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 600, color: row.elo > 1000 ? "#fa5d19" : "rgba(0,0,0,0.4)" }}>
-                    {row.elo.toLocaleString()}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            </div>
+          );
+        })()}
       </div>
     );
   }
@@ -541,57 +574,86 @@ export default function Home() {
             {showLeaderboard ? "hide leaderboard" : "view leaderboard"}
           </button>
 
-          {showLeaderboard && (
-            <div
-              style={{
-                maxWidth: 520,
-                margin: "20px auto 0",
-                background: "#ffffff",
-                border: "1px solid #e5e5e5",
-                borderRadius: 12,
-                overflow: "hidden",
-                boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-              }}
-            >
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr style={{ borderBottom: "1px solid #e5e5e5" }}>
-                    {["#", "Player", "Solved", "Tries", "Score"].map((h) => (
-                      <th key={h} style={{ padding: "12px 18px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "rgba(0,0,0,0.4)" }}>
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {leaderboard.length === 0 && (
-                    <tr>
-                      <td colSpan={5} style={{ padding: "16px 18px", fontSize: 13, color: "rgba(0,0,0,0.4)" }}>
-                        No entries yet.
-                      </td>
-                    </tr>
-                  )}
-                  {leaderboard.map((row, i) => (
-                    <tr key={row.github} style={{ borderBottom: "1px solid #f0f0f0" }}>
-                      <td style={{ padding: "10px 18px", fontSize: 13, fontWeight: 700, color: i < 3 ? "#fa5d19" : "rgba(0,0,0,0.3)" }}>
-                        {i + 1}
-                      </td>
-                      <td style={{ padding: "10px 18px", fontSize: 13, color: "#262626" }}>@{row.github}</td>
-                      <td style={{ padding: "10px 18px", fontSize: 13, color: row.solved === 10 ? "#1a9338" : "rgba(0,0,0,0.4)" }}>
-                        {row.solved}/10
-                      </td>
-                      <td style={{ padding: "10px 18px", fontSize: 13, color: "rgba(0,0,0,0.35)" }}>
-                        {row.attempts ?? 1}
-                      </td>
-                      <td style={{ padding: "10px 18px", fontSize: 13, fontWeight: 600, color: row.elo > 1000 ? "#fa5d19" : "rgba(0,0,0,0.4)" }}>
-                        {row.elo.toLocaleString()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          {showLeaderboard && (() => {
+            const totalPages = Math.max(1, Math.ceil(leaderboard.length / LB_PAGE_SIZE));
+            const page = Math.min(lbPage, totalPages - 1);
+            const slice = leaderboard.slice(page * LB_PAGE_SIZE, (page + 1) * LB_PAGE_SIZE);
+            return (
+              <div style={{ maxWidth: 520, margin: "20px auto 0" }}>
+                <div
+                  style={{
+                    background: "#ffffff",
+                    border: "1px solid #e5e5e5",
+                    borderRadius: 12,
+                    overflow: "hidden",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+                  }}
+                >
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ borderBottom: "1px solid #e5e5e5" }}>
+                        {["#", "Player", "Solved", "Tries", "Score"].map((h) => (
+                          <th key={h} style={{ padding: "12px 18px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "rgba(0,0,0,0.4)" }}>
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {slice.length === 0 && (
+                        <tr>
+                          <td colSpan={5} style={{ padding: "16px 18px", fontSize: 13, color: "rgba(0,0,0,0.4)" }}>
+                            No entries yet.
+                          </td>
+                        </tr>
+                      )}
+                      {slice.map((row, i) => {
+                        const rank = page * LB_PAGE_SIZE + i + 1;
+                        return (
+                          <tr key={row.github} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                            <td style={{ padding: "10px 18px", fontSize: 13, fontWeight: 700, color: rank <= 3 ? "#fa5d19" : "rgba(0,0,0,0.3)" }}>
+                              {rank}
+                            </td>
+                            <td style={{ padding: "10px 18px", fontSize: 13, color: "#262626" }}>@{row.github}</td>
+                            <td style={{ padding: "10px 18px", fontSize: 13, color: row.solved === 10 ? "#1a9338" : "rgba(0,0,0,0.4)" }}>
+                              {row.solved}/10
+                            </td>
+                            <td style={{ padding: "10px 18px", fontSize: 13, color: "rgba(0,0,0,0.35)" }}>
+                              {row.attempts ?? 1}
+                            </td>
+                            <td style={{ padding: "10px 18px", fontSize: 13, fontWeight: 600, color: row.elo > 1000 ? "#fa5d19" : "rgba(0,0,0,0.4)" }}>
+                              {row.elo.toLocaleString()}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                {totalPages > 1 && (
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 16, marginTop: 12 }}>
+                    <button
+                      onClick={() => setLbPage((p) => Math.max(0, p - 1))}
+                      disabled={page === 0}
+                      style={{ fontSize: 12, fontWeight: 600, fontFamily: "inherit", background: "none", border: "1px solid #e5e5e5", borderRadius: 6, padding: "6px 14px", cursor: page === 0 ? "not-allowed" : "pointer", color: page === 0 ? "rgba(0,0,0,0.2)" : "#262626" }}
+                    >
+                      Prev
+                    </button>
+                    <span style={{ fontSize: 12, color: "rgba(0,0,0,0.4)" }}>
+                      {page + 1} / {totalPages}
+                    </span>
+                    <button
+                      onClick={() => setLbPage((p) => Math.min(totalPages - 1, p + 1))}
+                      disabled={page >= totalPages - 1}
+                      style={{ fontSize: 12, fontWeight: 600, fontFamily: "inherit", background: "none", border: "1px solid #e5e5e5", borderRadius: 6, padding: "6px 14px", cursor: page >= totalPages - 1 ? "not-allowed" : "pointer", color: page >= totalPages - 1 ? "rgba(0,0,0,0.2)" : "#262626" }}
+                    >
+                      Next
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
       </div>
     );
