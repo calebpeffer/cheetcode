@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSession, signIn, signOut } from "next-auth/react";
-import { useQuery, useMutation } from "convex/react";
+import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { GameProblem } from "@/lib/types";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -79,10 +79,8 @@ export default function Home() {
   const canAutoSolve = process.env.NODE_ENV !== "production";
   const isMobile = useIsMobile();
 
-  // ── Convex hooks ──
+  // ── Convex hooks (read-only — all mutations go through authenticated API routes) ──
   const leaderboard = useQuery(api.leaderboard.getAll) ?? [];
-  const createSession = useMutation(api.sessions.create);
-  const submitLeadMutation = useMutation(api.leads.submit);
 
   // No worker — local validation uses the same QuickJS sandbox as final scoring
   // via /api/validate to guarantee parity between local and server checks
@@ -137,11 +135,12 @@ export default function Home() {
   }, [timeLeftMs, screen, finishGame]);
 
   async function startGame() {
-    // GitHub username is guaranteed by OAuth — no manual validation needed
     if (!isAuthenticated) return;
 
     try {
-      const d = await createSession({ github });
+      const res = await fetch("/api/session", { method: "POST" });
+      if (!res.ok) throw new Error(`session creation failed: ${res.status}`);
+      const d = await res.json();
       setSessionId(d.sessionId);
       setExpiresAt(d.expiresAt);
       setProblems(d.problems as unknown as GameProblem[]);
@@ -177,7 +176,6 @@ export default function Home() {
 
   async function submitLeadForm() {
     if (!sessionId) return;
-    // Client-side validation
     const emailResult = validateEmail(email);
     const xResult = validateXHandle(xHandle);
     if (emailResult.ok === false) { setEmailError(emailResult.error); return; }
@@ -186,13 +184,17 @@ export default function Home() {
     setXHandleError("");
 
     try {
-      await submitLeadMutation({
-        github,
-        email: emailResult.value,
-        xHandle: xResult.value || undefined,
-        flag,
-        sessionId,
+      const res = await fetch("/api/leads", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: emailResult.value,
+          xHandle: xResult.value || undefined,
+          flag,
+          sessionId,
+        }),
       });
+      if (!res.ok) throw new Error(`lead submission failed: ${res.status}`);
       setSubmittedLead(true);
     } catch (err) {
       console.error("submitLead failed:", err);

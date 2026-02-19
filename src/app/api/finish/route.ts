@@ -11,6 +11,7 @@ import {
   INJECTION_ECHO_HEADER,
 } from "../../../lib/scoring";
 import { resolveGitHubFromHeader } from "../../../lib/github-auth";
+import { auth } from "../../../../auth";
 
 /**
  * POST /api/finish
@@ -100,9 +101,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "invalid request" }, { status: 400 });
     }
 
-    // Resolve GitHub identity: PAT header takes priority, falls back to body field
-    const patUsername = await resolveGitHubFromHeader(request);
-    const resolvedGithub = patUsername ?? github;
+    // Resolve GitHub identity: PAT header > OAuth session > reject
+    // Never trust the github field from the request body
+    let resolvedGithub = await resolveGitHubFromHeader(request);
+    if (!resolvedGithub) {
+      const oauthSession = await auth();
+      resolvedGithub = (oauthSession?.user as { githubUsername?: string })?.githubUsername ?? null;
+    }
 
     if (!resolvedGithub) {
       return NextResponse.json(
@@ -179,8 +184,9 @@ export async function POST(request: Request) {
     // Net modifier = exploit bonuses + landmine penalties (penalties are negative)
     const scoreModifier = exploitBonus + landminePenalty;
 
-    // Record results + update leaderboard
-    const result = await convex.mutation(api.submissions.recordResults, {
+    // Record results via authenticated Convex action
+    const result = await convex.action(api.submissions.recordResults, {
+      secret: process.env.CONVEX_MUTATION_SECRET!,
       sessionId: sessionId as Id<"sessions">,
       github: ghResult.value,
       solvedProblemIds,

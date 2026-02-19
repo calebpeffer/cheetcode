@@ -1,8 +1,13 @@
 import { v } from "convex/values";
-import { mutation } from "./_generated/server";
-import { validateGithub, validateEmail, validateXHandle } from "../src/lib/validation";
+import { internalMutation, action } from "./_generated/server";
+import { internal } from "./_generated/api";
+import {
+  validateGithub,
+  validateEmail,
+  validateXHandle,
+} from "../src/lib/validation";
 
-export const submit = mutation({
+export const submitInternal = internalMutation({
   args: {
     github: v.string(),
     email: v.string(),
@@ -11,7 +16,6 @@ export const submit = mutation({
     sessionId: v.id("sessions"),
   },
   handler: async (ctx, args) => {
-    // Server-side input validation
     const ghResult = validateGithub(args.github);
     if (ghResult.ok === false) throw new Error(ghResult.error);
     const emailResult = validateEmail(args.email);
@@ -24,6 +28,11 @@ export const submit = mutation({
     const session = await ctx.db.get(args.sessionId);
     if (!session) {
       throw new Error("session not found");
+    }
+
+    // Verify the github matches the session owner
+    if (ghResult.value !== session.github) {
+      throw new Error("github mismatch");
     }
 
     const leaderboardRow = await ctx.db
@@ -40,11 +49,16 @@ export const submit = mutation({
       .withIndex("by_github", (query) => query.eq("github", ghResult.value))
       .first();
 
-    const xNormalized = args.xHandle ? validateXHandle(args.xHandle) : null;
+    const xNormalized = args.xHandle
+      ? validateXHandle(args.xHandle)
+      : null;
     const payload = {
       github: ghResult.value,
       email: emailResult.value,
-      xHandle: (xNormalized && xNormalized.ok && xNormalized.value) ? xNormalized.value : undefined,
+      xHandle:
+        xNormalized && xNormalized.ok && xNormalized.value
+          ? xNormalized.value
+          : undefined,
       flag: args.flag,
       elo: leaderboardRow.elo,
       solved: leaderboardRow.solved,
@@ -58,5 +72,30 @@ export const submit = mutation({
 
     await ctx.db.insert("leads", payload);
     return { ok: true, upserted: "created" };
+  },
+});
+
+/** Authenticated gateway — only the Next.js server can call this */
+export const submit = action({
+  args: {
+    secret: v.string(),
+    github: v.string(),
+    email: v.string(),
+    xHandle: v.optional(v.string()),
+    flag: v.optional(v.string()),
+    sessionId: v.id("sessions"),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ ok: boolean; upserted: string }> => {
+    if (args.secret !== process.env.CONVEX_MUTATION_SECRET) {
+      throw new Error("unauthorized");
+    }
+    const { secret: _, ...mutationArgs } = args;
+    return await ctx.runMutation(
+      internal.leads.submitInternal,
+      mutationArgs,
+    );
   },
 });
