@@ -7,7 +7,7 @@ export const getAll = query({
       .query("leaderboard")
       .withIndex("by_elo")
       .order("desc")
-      .take(500);
+      .collect();
 
     return entries.sort((a, b) => {
       if (b.elo !== a.elo) return b.elo - a.elo;
