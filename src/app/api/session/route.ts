@@ -30,7 +30,16 @@ export async function POST(request: Request) {
   }
 
   try {
-    const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+    const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+    const hasSecret = !!process.env.CONVEX_MUTATION_SECRET;
+    if (!convexUrl) {
+      return NextResponse.json({ error: "NEXT_PUBLIC_CONVEX_URL not configured" }, { status: 500 });
+    }
+    if (!hasSecret) {
+      return NextResponse.json({ error: "CONVEX_MUTATION_SECRET not configured" }, { status: 500 });
+    }
+
+    const convex = new ConvexHttpClient(convexUrl);
     const result = await convex.action(api.sessions.create, {
       secret: process.env.CONVEX_MUTATION_SECRET!,
       github,
