@@ -82,6 +82,7 @@ export default function Home() {
   // ── Convex hooks (read-only — all mutations go through authenticated API routes) ──
   const leaderboard = useQuery(api.leaderboard.getAll) ?? [];
   const [lbPage, setLbPage] = useState(0);
+  const [lbSearch, setLbSearch] = useState("");
   const LB_PAGE_SIZE = 25;
 
   // No worker — local validation uses the same QuickJS sandbox as final scoring
@@ -293,11 +294,33 @@ export default function Home() {
 
         {/* Leaderboard always shown on mobile */}
         {(() => {
-          const totalPages = Math.max(1, Math.ceil(leaderboard.length / LB_PAGE_SIZE));
+          const filtered = lbSearch.trim()
+            ? leaderboard.filter((row) => row.github.toLowerCase().includes(lbSearch.trim().toLowerCase()))
+            : leaderboard;
+          const totalPages = Math.max(1, Math.ceil(filtered.length / LB_PAGE_SIZE));
           const page = Math.min(lbPage, totalPages - 1);
-          const slice = leaderboard.slice(page * LB_PAGE_SIZE, (page + 1) * LB_PAGE_SIZE);
+          const slice = filtered.slice(page * LB_PAGE_SIZE, (page + 1) * LB_PAGE_SIZE);
           return (
             <div style={{ width: "100%", maxWidth: 520 }}>
+              <input
+                value={lbSearch}
+                onChange={(e) => { setLbSearch(e.target.value); setLbPage(0); }}
+                placeholder="Search player..."
+                style={{
+                  width: "100%",
+                  height: 36,
+                  border: "1px solid #e5e5e5",
+                  borderRadius: 8,
+                  padding: "0 12px",
+                  fontSize: 13,
+                  fontFamily: "inherit",
+                  color: "#262626",
+                  outline: "none",
+                  marginBottom: 10,
+                  boxSizing: "border-box",
+                  background: "#fafafa",
+                }}
+              />
               <div
                 style={{
                   background: "#ffffff",
@@ -326,7 +349,9 @@ export default function Home() {
                       </tr>
                     )}
                     {slice.map((row, i) => {
-                      const rank = page * LB_PAGE_SIZE + i + 1;
+                      const rank = lbSearch.trim()
+                        ? leaderboard.indexOf(slice[i]) + 1
+                        : page * LB_PAGE_SIZE + i + 1;
                       return (
                         <tr key={row.github} style={{ borderBottom: "1px solid #f0f0f0" }}>
                           <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 700, color: rank <= 3 ? "#fa5d19" : "rgba(0,0,0,0.3)" }}>
@@ -575,11 +600,33 @@ export default function Home() {
           </button>
 
           {showLeaderboard && (() => {
-            const totalPages = Math.max(1, Math.ceil(leaderboard.length / LB_PAGE_SIZE));
+            const filtered = lbSearch.trim()
+              ? leaderboard.filter((row) => row.github.toLowerCase().includes(lbSearch.trim().toLowerCase()))
+              : leaderboard;
+            const totalPages = Math.max(1, Math.ceil(filtered.length / LB_PAGE_SIZE));
             const page = Math.min(lbPage, totalPages - 1);
-            const slice = leaderboard.slice(page * LB_PAGE_SIZE, (page + 1) * LB_PAGE_SIZE);
+            const slice = filtered.slice(page * LB_PAGE_SIZE, (page + 1) * LB_PAGE_SIZE);
             return (
               <div style={{ maxWidth: 520, margin: "20px auto 0" }}>
+                <input
+                  value={lbSearch}
+                  onChange={(e) => { setLbSearch(e.target.value); setLbPage(0); }}
+                  placeholder="Search player..."
+                  style={{
+                    width: "100%",
+                    height: 36,
+                    border: "1px solid #e5e5e5",
+                    borderRadius: 8,
+                    padding: "0 12px",
+                    fontSize: 13,
+                    fontFamily: "inherit",
+                    color: "#262626",
+                    outline: "none",
+                    marginBottom: 10,
+                    boxSizing: "border-box",
+                    background: "#fafafa",
+                  }}
+                />
                 <div
                   style={{
                     background: "#ffffff",
@@ -608,7 +655,9 @@ export default function Home() {
                         </tr>
                       )}
                       {slice.map((row, i) => {
-                        const rank = page * LB_PAGE_SIZE + i + 1;
+                        const rank = lbSearch.trim()
+                          ? leaderboard.indexOf(slice[i]) + 1
+                          : page * LB_PAGE_SIZE + i + 1;
                         return (
                           <tr key={row.github} style={{ borderBottom: "1px solid #f0f0f0" }}>
                             <td style={{ padding: "10px 18px", fontSize: 13, fontWeight: 700, color: rank <= 3 ? "#fa5d19" : "rgba(0,0,0,0.3)" }}>
