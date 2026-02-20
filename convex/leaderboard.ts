@@ -9,9 +9,13 @@ export const getAll = query({
       .order("desc")
       .collect();
 
-    return entries.sort((a, b) => {
+    const sorted = entries.sort((a, b) => {
       if (b.elo !== a.elo) return b.elo - a.elo;
       return (a.attempts ?? 1) - (b.attempts ?? 1);
     });
+
+    // Redact internal Convex document IDs and session references
+    // to prevent impersonation and session enumeration attacks.
+    return sorted.map(({ _id, _creationTime, sessionId, ...rest }) => rest);
   },
 });

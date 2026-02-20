@@ -28,10 +28,13 @@ export const recordResultsInternal = internalMutation({
     }
 
     // Only accept problem IDs that were actually assigned to this session
+    // Deduplicate to prevent score inflation via duplicate submissions
     const sessionProblemSet = new Set(session.problemIds);
-    const validSolvedIds = args.solvedProblemIds.filter((id) =>
-      sessionProblemSet.has(id),
-    );
+    const validSolvedIds = [
+      ...new Set(
+        args.solvedProblemIds.filter((id) => sessionProblemSet.has(id)),
+      ),
+    ];
 
     // Cap exploitBonus at the mutation layer too
     const cappedExploitBonus = Math.max(
@@ -152,9 +155,22 @@ export const recordResults = action({
   },
 });
 
+/**
+ * getSession — returns session metadata for validation purposes.
+ * Redacts internal fields to prevent information leakage.
+ */
 export const getSession = query({
   args: { sessionId: v.id("sessions") },
   handler: async (ctx, args) => {
-    return await ctx.db.get(args.sessionId);
+    const session = await ctx.db.get(args.sessionId);
+    if (!session) return null;
+    // Only return fields needed for validation — omit github to
+    // prevent unauthenticated enumeration of player sessions.
+    return {
+      _id: session._id,
+      problemIds: session.problemIds,
+      startedAt: session.startedAt,
+      expiresAt: session.expiresAt,
+    };
   },
 });

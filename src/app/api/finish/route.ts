@@ -138,10 +138,21 @@ export async function POST(request: Request) {
     // Load QuickJS WASM once, reuse for all problems
     const qjs = await getQJS();
 
-    // Validate each submission — only accept problems assigned to this session
+    // Deduplicate submissions by problemId — only validate each problem once
+    // to prevent score inflation via duplicate submissions (8192x exploit).
+    const seenProblemIds = new Set<string>();
+    const dedupedSubmissions: Submission[] = [];
+    for (const sub of submissions) {
+      if (!seenProblemIds.has(sub.problemId)) {
+        seenProblemIds.add(sub.problemId);
+        dedupedSubmissions.push(sub);
+      }
+    }
+
+    // Validate each unique submission — only accept problems assigned to this session
     const solvedProblemIds: string[] = [];
     let extraSubmissions = 0;
-    for (const sub of submissions) {
+    for (const sub of dedupedSubmissions) {
       const problem = PROBLEM_BANK.find((p) => p.id === sub.problemId);
       if (!problem || !sub.code.trim()) continue;
 
